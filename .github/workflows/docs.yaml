@@ -30,6 +30,7 @@ jobs:
         with:
           repository: ${{ env.GITHUB_OWNER }}/covasim-docs
           path: covasim-docs
+          ssh-key: '${{ secrets.DOCS_DEPLOY_KEY }}'
       - name: Checkout sources
         uses: actions/checkout@v2
         with:
@@ -58,8 +59,10 @@ jobs:
           make html
           popd
 
+          mv covasim-docs/covasim.pdf ./covasim.pdf
           rm -rf covasim-docs/*
           rsync -r covasim/docs/_build/html/ covasim-docs/
+          mv ./covasim.pdf covasim-docs/covasim.pdf
       - name: Commit Docs
         run: |
           pushd covasim-docs

@@ -3,20 +3,174 @@ Miscellaneous functions that do not belong anywhere else
 '''
 
 import numpy as np
-import pylab  as pl # Used by fixaxis()
-import sciris as sc # Used by fixaxis()
-import scipy.stats as sps # Used by poisson_test()
+import pandas as pd
+import sciris as sc
+import datetime as dt
+import scipy.stats as sps
 from . import version as cvver
 
 
-__all__ = ['KeyNotFoundError', 'check_version', 'git_info', 'fixaxis', 'progressbar', 'get_doubling_time', 'poisson_test']
+__all__ = ['load_data', 'date', 'daydiff', 'load', 'save', 'check_version', 'git_info', 'get_doubling_time', 'poisson_test']
 
 
-class KeyNotFoundError(KeyError):
-    ''' A tiny class to fix repr for KeyErrors '''
+def load_data(filename, columns=None, calculate=True, verbose=True, **kwargs):
+    '''
+    Load data for comparing to the model output.
 
-    def __str__(self):
-        return Exception.__str__(self)
+    Args:
+        filename (str): the name of the file to load (either Excel or CSV)
+        columns (list): list of column names (otherwise, load all)
+        calculate (bool): whether or not to calculate cumulative values from daily counts
+        kwargs (dict): passed to pd.read_excel()
+
+    Returns:
+        data (dataframe): pandas dataframe of the loaded data
+    '''
+
+    # Load data
+    if filename.lower().endswith('csv'):
+        raw_data = pd.read_csv(filename, **kwargs)
+    elif filename.lower().endswith('xlsx'):
+        raw_data = pd.read_excel(filename, **kwargs)
+    else:
+        errormsg = f'Currently loading is only supported from .csv and .xlsx files, not {filename}'
+        raise NotImplementedError(errormsg)
+
+    # Confirm data integrity and simplify
+    if columns is not None:
+        for col in columns:
+            if col not in raw_data.columns:
+                errormsg = f'Column "{col}" is missing from the loaded data'
+                raise ValueError(errormsg)
+        data = raw_data[columns]
+    else:
+        data = raw_data
+
+    # Calculate any cumulative columns that are missing
+    if calculate:
+        columns = data.columns
+        for col in columns:
+            if col.startswith('new'):
+                cum_col = col.replace('new_', 'cum_')
+                if cum_col not in columns:
+                    data[cum_col] = np.cumsum(data[col])
+                    if verbose:
+                        print(f'  Automatically adding cumulative column {cum_col} from {col}')
+
+    # Ensure required columns are present
+    if 'date' not in data.columns:
+        errormsg = f'Required column "date" not found; columns are {data.columns}'
+        raise ValueError(errormsg)
+    else:
+        data['date'] = pd.to_datetime(data['date']).dt.date
+
+    data.set_index('date', inplace=True, drop=False) # So sim.data['date'] can still be accessed
+
+    return data
+
+
+def date(obj, *args, **kwargs):
+    '''
+    Convert a string or a datetime object to a date object. To convert to an integer
+    from the start day, use sim.date() instead.
+
+    Args:
+        obj (str, date, datetime): the object to convert
+        args (str, date, datetime): additional objects to convert
+
+    Returns:
+        dates (date or list): either a single date object, or a list of them
+
+    **Examples**::
+
+        cv.date('2020-04-05') # Returns datetime.date(2020, 4, 5)
+    '''
+    # Convert to list
+    obj = sc.promotetolist(obj) # Ensure it's iterable
+    obj.extend(args)
+
+    dates = []
+    for d in obj:
+        try:
+            if type(d) == dt.date: # Do not use isinstance, since must be the exact type
+                pass
+            elif sc.isstring(d):
+                d = sc.readdate(d).date()
+            elif isinstance(d, dt.datetime):
+                d = d.date()
+            else:
+                errormsg = f'Cannot interpret {type(d)} as a date, must be date, datetime, or string'
+                raise TypeError(errormsg)
+            dates.append(d)
+        except Exception as E:
+            errormsg = f'Conversion of "{d}" to a date failed: {str(E)}'
+            raise ValueError(errormsg)
+
+    # Return an integer rather than a list if only one provided
+    if len(dates)==1:
+        dates = dates[0]
+
+    return dates
+
+
+def daydiff(*args):
+    '''
+    Convenience function to find the difference between two or more days. With
+    only one argument, calculate days sin 2020-01-01.
+
+    **Example**::
+
+        since_ny = cv.daydiff('2020-03-20') # Returns 79 days since Jan. 1st
+        diff     = cv.daydiff('2020-03-20', '2020-04-05') # Returns 16
+        diffs    = cv.daydiff('2020-03-20', '2020-04-05', '2020-05-01') # Returns [16, 26]
+    '''
+    days = [date(day) for day in args]
+    if len(days) == 1:
+        days.insert(0, date('2020-01-01')) # With one date, return days since Jan. 1st
+
+    output = []
+    for i in range(len(days)-1):
+        diff = (days[i+1] - days[i]).days
+        output.append(diff)
+
+    if len(output) == 1:
+        output = output[0]
+
+    return output
+
+
+def load(*args, **kwargs):
+    '''
+    Convenience method for sc.loadobj() and equivalent to cv.Sim.load() or
+    cv.Scenarios.load().
+
+    **Examples**::
+
+        sim = cv.load('calib.sim')
+        scens = cv.load(filename='school-closures.scens', folder='schools')
+    '''
+    obj = sc.loadobj(*args, **kwargs)
+    if hasattr(obj, 'version'):
+        v_curr = cvver.__version__
+        v_obj = obj.version
+        cmp = check_version(v_obj, verbose=False)
+        if cmp != 0:
+            print(f'Note: you have Covasim v{v_curr}, but are loading an object from v{v_obj}')
+    return obj
+
+
+def save(*args, **kwargs):
+    '''
+    Convenience method for sc.saveobj() and equivalent to cv.Sim.save() or
+    cv.Scenarios.save().
+
+    **Examples**::
+
+        cv.save('calib.sim', sim)
+        cv.save(filename='school-closures.scens', folder='schools', obj=scens)
+    '''
+    filepath = sc.saveobj(*args, **kwargs)
+    return filepath
 
 
 def check_version(expected, die=False, verbose=True, **kwargs):
@@ -60,6 +214,7 @@ def git_info(filename=None, check=False, old_info=None, die=False, verbose=True,
             output = sc.savejson(filename, info, **kwargs)
         else:
             output = info
+        return output
     else:
         if filename is not None:
             old_info = sc.loadjson(filename, **kwargs)
@@ -70,49 +225,7 @@ def git_info(filename=None, check=False, old_info=None, die=False, verbose=True,
                 raise ValueError(string)
             elif verbose:
                 print(string)
-    return output
-
-
-def fixaxis(sim, useSI=True, boxoff=False):
-    ''' Make the plotting more consistent -- add a legend and ensure the axes start at 0 '''
-    delta = 0.5
-    pl.legend() # Add legend
-    sc.setylim() # Rescale y to start at 0
-    pl.xlim((0, sim['n_days']+delta))
-    if boxoff:
-        sc.boxoff() # Turn off top and right lines
-    return
-
-
-def progressbar(i, maxiters, label='', length=30, empty='—', full='•', newline=False):
-    '''
-    Call in a loop to create terminal progress bar.
-
-    Args:
-        i (int): current iteration
-        maxiters (int): maximum number of iterations
-        label (str): initial label to print
-        length (int): length of progress bar
-        empty (str): character for empty steps
-        full (str): character for empty steps
-
-    **Example**::
-
-        import pylab as pl
-        for i in range(100):
-            progressbar(i+1, 100)
-            pl.pause(0.05)
-
-    Adapted from example by Greenstick (https://stackoverflow.com/questions/3173320/text-progress-bar-in-the-console)
-    '''
-    ending = None if newline else '\r'
-    pct = i/maxiters*100
-    percent = f'{pct:0.0f}%'
-    filled = int(length*i//maxiters)
-    bar = full*filled + empty*(length-filled)
-    print(f'\r{label} {bar} {percent}', end=ending)
-    if i == maxiters: print()
-    return
+        return
 
 
 def get_doubling_time(sim, series=None, interval=None, start_day=None, end_day=None, moving_window=None, exp_approx=False, max_doubling_time=100, eps=1e-3, verbose=None):
@@ -214,7 +327,7 @@ def get_doubling_time(sim, series=None, interval=None, start_day=None, end_day=N
 
 
 def poisson_test(count1, count2, exposure1=1, exposure2=1, ratio_null=1,
-                      method='score', alternative='2-sided'):
+                      method='score', alternative='two-sided'):
     '''Test for ratio of two sample Poisson intensities
 
     If the two Poisson rates are g1 and g2, then the Null hypothesis is
@@ -295,7 +408,7 @@ def poisson_test(count1, count2, exposure1=1, exposure2=1, ratio_null=1,
         elif alternative in ['smaller', 's']:
             pvalue = sps.norm.cdf(zstat)
         else:
-            raise ValueError('invalid alternative')
+            raise ValueError(f'invalid alternative "{alternative}"')
         return pvalue# zstat
 
     # shortcut names
@@ -323,8 +436,9 @@ def poisson_test(count1, count2, exposure1=1, exposure2=1, ratio_null=1,
         if method in ['cond-midp']:
             # not inplace in case we still want binom pvalue
             pvalue = pvalue - 0.5 * sps.binom.pmf(y1, y_total, bp)
-
         dist = 'binomial'
+    else:
+        raise ValueError(f'invalid method "{method}"')
 
     if dist == 'normal':
         return zstat_generic2(stat, 1, alternative)

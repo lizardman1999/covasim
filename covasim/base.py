@@ -2,13 +2,14 @@
 Base classes for Covasim.
 '''
 
-import datetime as dt
-import numpy as np # Needed for a few things not provided by pl
-import sciris as sc
+import numpy as np
 import pandas as pd
+import sciris as sc
+import datetime as dt
 from . import utils as cvu
 from . import misc as cvm
 from . import defaults as cvd
+from . import plotting as cvplt
 
 # Specify all externally visible classes this file defines
 __all__ = ['ParsObj', 'Result', 'BaseSim', 'BasePeople', 'Person', 'FlexDict', 'Contacts', 'Layer', 'TransTree']
@@ -32,8 +33,7 @@ class ParsObj(sc.prettyobj):
         except:
             all_keys = '\n'.join(list(self.pars.keys()))
             errormsg = f'Key "{key}" not found; available keys:\n{all_keys}'
-            raise cvm.KeyNotFoundError(errormsg)
-            return
+            raise sc.KeyNotFoundError(errormsg)
 
     def __setitem__(self, key, value):
         ''' Ditto '''
@@ -42,7 +42,7 @@ class ParsObj(sc.prettyobj):
         else:
             all_keys = '\n'.join(list(self.pars.keys()))
             errormsg = f'Key "{key}" not found; available keys:\n{all_keys}'
-            raise cvm.KeyNotFoundError(errormsg)
+            raise sc.KeyNotFoundError(errormsg)
         return
 
     def update_pars(self, pars=None, create=False):
@@ -63,7 +63,7 @@ class ParsObj(sc.prettyobj):
                 mismatches = [key for key in pars.keys() if key not in available_keys]
                 if len(mismatches):
                     errormsg = f'Key(s) {mismatches} not found; available keys are {available_keys}'
-                    raise cvm.KeyNotFoundError(errormsg)
+                    raise sc.KeyNotFoundError(errormsg)
             self.pars.update(pars)
         return
 
@@ -74,7 +74,6 @@ class Result(object):
 
     Args:
         name (str): name of this result, e.g. new_infections
-        values (array): array of values corresponding to this result
         npts (int): if values is None, precreate it to be of this length
         scale (str): whether or not the value scales by population size; options are "dynamic", "static", or False
         color (str or array): default color for plotting (hex or RGB notation)
@@ -84,29 +83,30 @@ class Result(object):
         import covasim as cv
         r1 = cv.Result(name='test1', npts=10)
         r1[:5] = 20
-        print(r2.values)
-        r2 = cv.Result(name='test2', values=range(10))
-        print(r2)
+        print(r1.values)
     '''
 
-    def __init__(self, name=None, values=None, npts=None, scale='dynamic', color=None):
+    def __init__(self, name=None, npts=None, scale='dynamic', color=None):
         self.name =  name  # Name of this result
         self.scale = scale # Whether or not to scale the result by the scale factor
         if color is None:
             color = '#000000'
         self.color = color # Default color
-        if values is None:
-            if npts is not None:
-                values = np.zeros(int(npts)) # If length is known, use zeros
-            else:
-                values = [] # Otherwise, empty
-        self.values = np.array(values, dtype=cvd.result_float) # Ensure it's an array
+        if npts is None:
+            npts = 0
+        self.values = np.array(np.zeros(int(npts)), dtype=cvd.result_float)
+        self.low    = None
+        self.high   = None
         return
 
     def __repr__(self, *args, **kwargs):
         ''' Use pretty repr, like sc.prettyobj, but displaying full values '''
-        output  = sc.prepr(self, skip='values')
+        output  = sc.prepr(self, skip=['values', 'low', 'high'])
         output += 'values:\n' + repr(self.values)
+        if self.low is not None:
+            output += '\nlow:\n' + repr(self.low)
+        if self.high is not None:
+            output += '\nhigh:\n' + repr(self.high)
         return output
 
     def __getitem__(self, *args, **kwargs):
@@ -186,19 +186,91 @@ class BaseSim(ParsObj):
             return np.array([])
 
 
-    def inds2dates(self, inds, dateformat=None):
-        ''' Convert a set of indices to a set of dates '''
+    def day(self, day, *args):
+        '''
+        Convert a string, date/datetime object, or int to a day (int).
 
-        if sc.isnumber(inds): # If it's a number, convert it to a list
-            inds = sc.promotetolist(inds)
+        Args:
+            day (str, date, int, or list): convert any of these objects to a day relative to the simulation's start day
 
+        Returns:
+            days (int or str): the day(s) in simulation time
+
+        **Example**::
+
+            sim.day('2020-04-05') # Returns 35
+        '''
+        # Do not process a day if it's not supplied
+        if day is None:
+            return None
+
+        # Convert to list
+        if sc.isstring(day) or sc.isnumber(day) or isinstance(day, (dt.date, dt.datetime)):
+            day = sc.promotetolist(day) # Ensure it's iterable
+        day.extend(args)
+
+        days = []
+        for d in day:
+            if sc.isnumber(d):
+                days.append(int(d)) # Just convert to an integer
+            else:
+                try:
+                    if sc.isstring(d):
+                        d = sc.readdate(d).date()
+                    elif isinstance(d, dt.datetime):
+                        d = d.date()
+                    d_day = (d - self['start_day']).days
+                    days.append(d_day)
+                except Exception as E:
+                    errormsg = f'Could not interpret "{d}" as a date: {str(E)}'
+                    raise ValueError(errormsg)
+
+        # Return an integer rather than a list if only one provided
+        if len(days)==1:
+            days = days[0]
+
+        return days
+
+
+    def date(self, ind, *args, dateformat=None, as_date=False):
+        '''
+        Convert one or more integer days of simulation time to a date/list of dates --
+        by default returns a string, or returns a datetime Date object if as_date is True.
+
+        Args:
+            ind (int, list, or array): the day(s) in simulation time
+            as_date (bool): whether to return as a datetime date instead of a string
+
+        Returns:
+            dates (str, Date, or list): the date(s) corresponding to the simulation day(s)
+
+        **Examples**::
+
+            sim.date(34) # Returns '2020-04-04'
+            sim.date([34, 54]) # Returns ['2020-04-04', '2020-04-24']
+            sim.date(34, 54, as_dt=True) # Returns [datetime.date(2020, 4, 4), datetime.date(2020, 4, 24)]
+        '''
+
+        # Handle inputs
+        if sc.isnumber(ind): # If it's a number, convert it to a list
+            ind = sc.promotetolist(ind)
+        ind.extend(args)
         if dateformat is None:
-            dateformat = '%b-%d'
+            dateformat = '%Y-%m-%d'
 
+        # Do the conversion
         dates = []
-        for ind in inds:
-            tmp = self['start_day'] + dt.timedelta(days=int(ind))
-            dates.append(tmp.strftime(dateformat))
+        for i in ind:
+            date_obj = self['start_day'] + dt.timedelta(days=int(i))
+            if as_date:
+                dates.append(date_obj)
+            else:
+                dates.append(date_obj.strftime(dateformat))
+
+        # Return a string rather than a list if only one provided
+        if len(ind)==1:
+            dates = dates[0]
+
         return dates
 
 
@@ -208,24 +280,27 @@ class BaseSim(ParsObj):
         return keys
 
 
-    def layer_keys(self):
-        ''' Get the available contact keys -- set by beta_layer rather than contacts since only the former is required '''
-        keys = list(self['beta_layer'].keys())
-        return keys
+    def copy(self):
+        ''' Returns a deep copy of the sim '''
+        return sc.dcp(self)
 
 
-    def _make_resdict(self, for_json=True):
+    def export_results(self, for_json=True, filename=None, indent=2, *args, **kwargs):
         '''
-        Convert results to dict
+        Convert results to dict -- see also to_json().
 
         The results written to Excel must have a regular table shape, whereas
         for the JSON output, arbitrary data shapes are supported.
 
         Args:
-            for_json: If False, only data associated with Result objects will be included in the converted output
+            for_json (bool): if False, only data associated with Result objects will be included in the converted output
+            filename (str): filename to save to; if None, do not save
+            indent (int): indent (int): if writing to file, how many indents to use per nested level
+            args (list): passed to savejson()
+            kwargs (dict): passed to savejson()
 
         Returns:
-            resdict (dict): Dictionary representation of the results
+            resdict (dict): dictionary representation of the results
 
         '''
         resdict = {}
@@ -241,18 +316,26 @@ class BaseSim(ParsObj):
                     resdict[key] = [str(d) for d in res] # Convert dates to strings
                 else:
                     resdict[key] = res
+        if filename is not None:
+            sc.savejson(filename=filename, obj=resdict, indent=indent, *args, **kwargs)
         return resdict
 
 
-    def _make_pardict(self):
+    def export_pars(self, filename=None, indent=2, *args, **kwargs):
         '''
-        Return parameters for JSON export
+        Return parameters for JSON export -- see also to_json().
 
         This method is required so that interventions can specify
-        their JSON-friendly representation
+        their JSON-friendly representation.
+
+        Args:
+            filename (str): filename to save to; if None, do not save
+            indent (int): indent (int): if writing to file, how many indents to use per nested level
+            args (list): passed to savejson()
+            kwargs (dict): passed to savejson()
 
         Returns:
-
+            pardict (dict): a dictionary containing all the parameter values
         '''
         pardict = {}
         for key in self.pars.keys():
@@ -262,15 +345,12 @@ class BaseSim(ParsObj):
                 pardict[key] = str(self.pars[key])
             else:
                 pardict[key] = self.pars[key]
+        if filename is not None:
+            sc.savejson(filename=filename, obj=pardict, indent=indent, *args, **kwargs)
         return pardict
 
 
-    def copy(self):
-        ''' Returns a deep copy of the sim '''
-        return sc.dcp(self)
-
-
-    def to_json(self, filename=None, keys=None, tostring=True, indent=2, verbose=False, *args, **kwargs):
+    def to_json(self, filename=None, keys=None, tostring=False, indent=2, verbose=False, *args, **kwargs):
         '''
         Export results as JSON.
 
@@ -287,8 +367,9 @@ class BaseSim(ParsObj):
             A unicode string containing a JSON representation of the results,
             or writes the JSON file to disk
 
-        Examples:
-            string = sim.to_json()
+        **Examples**::
+
+            json = sim.to_json()
             sim.to_json('results.json')
             sim.to_json('summary.json', keys='summary')
         '''
@@ -298,14 +379,14 @@ class BaseSim(ParsObj):
             keys = ['results', 'pars', 'summary']
         keys = sc.promotetolist(keys)
 
-        # Convert to JSON-compatibleformat
+        # Convert to JSON-compatible format
         d = {}
         for key in keys:
             if key == 'results':
-                resdict = self._make_resdict()
+                resdict = self.export_results(for_json=True)
                 d['results'] = resdict
             elif key in ['pars', 'parameters']:
-                pardict = self._make_pardict()
+                pardict = self.export_pars()
                 d['parameters'] = pardict
             elif key == 'summary':
                 d['summary'] = dict(sc.dcp(self.summary))
@@ -335,7 +416,7 @@ class BaseSim(ParsObj):
             An sc.Spreadsheet with an Excel file, or writes the file to disk
 
         '''
-        resdict = self._make_resdict(for_json=False)
+        resdict = self.export_results(for_json=False)
         result_df = pd.DataFrame.from_dict(resdict)
         result_df.index = self.tvec
         result_df.index.name = 'Day'
@@ -386,7 +467,7 @@ class BaseSim(ParsObj):
             return shrunken_sim
 
 
-    def save(self, filename=None, keep_people=False, skip_attrs=None, **kwargs):
+    def save(self, filename=None, keep_people=None, skip_attrs=None, **kwargs):
         '''
         Save to disk as a gzipped pickle.
 
@@ -401,26 +482,38 @@ class BaseSim(ParsObj):
 
             sim.save() # Saves to a .sim file with the date and time of creation by default
         '''
+
+        # Set keep_people based on whether or not we're in the middle of a run
+        if keep_people is None:
+            if self.initialized and not self.results_ready:
+                keep_people = True
+            else:
+                keep_people = False
+
+        # Handle the filename
         if filename is None:
             filename = self.simfile
         filename = sc.makefilepath(filename=filename, **kwargs)
         self.filename = filename # Store the actual saved filename
+
+        # Handle the shrinkage and save
         if skip_attrs or not keep_people:
             obj = self.shrink(skip_attrs=skip_attrs, in_place=False)
         else:
             obj = self
         sc.saveobj(filename=filename, obj=obj)
+
         return filename
 
 
     @staticmethod
-    def load(filename, **kwargs):
+    def load(filename, *args, **kwargs):
         '''
         Load from disk from a gzipped pickle.
 
         Args:
             filename (str): the name or path of the file to save to
-            keywords: passed to makefilepath()
+            kwargs: passed to sc.loadobj()
 
         Returns:
             sim (Sim): the loaded simulation object
@@ -429,8 +522,10 @@ class BaseSim(ParsObj):
 
             sim = cv.Sim.load('my-simulation.sim')
         '''
-        filename = sc.makefilepath(filename=filename, **kwargs)
-        sim = sc.loadobj(filename=filename)
+        sim = cvm.load(filename, *args, **kwargs)
+        if not isinstance(sim, BaseSim):
+            errormsg = f'Cannot load object of {type(sim)} as a Sim object'
+            raise TypeError(errormsg)
         return sim
 
 
@@ -453,6 +548,9 @@ class BasePeople(sc.prettyobj):
                 pop_size = 0
         pop_size = int(pop_size)
         self.pop_size = pop_size
+        if pars is not None:
+            n_days = pars['n_days']
+        self.n_days = n_days
 
         # Other initialization
         self.t = 0 # Keep current simulation time
@@ -460,7 +558,7 @@ class BasePeople(sc.prettyobj):
         self.meta = cvd.PeopleMeta() # Store list of keys and dtypes
         self.contacts = None
         self.init_contacts() # Initialize the contacts
-        self.transtree = TransTree(pop_size=pop_size) # Initialize the transmission tree
+        self.transtree = TransTree(pop_size=pop_size, n_days=n_days) # Initialize the transmission tree
 
         return
 
@@ -695,7 +793,7 @@ class BasePeople(sc.prettyobj):
         # Validate the supplied contacts
         if isinstance(contacts, Contacts):
             new_contacts = contacts
-        if isinstance(contacts, Layer):
+        elif isinstance(contacts, Layer):
             new_contacts = {}
             new_contacts[lkey] = contacts
         elif sc.checktype(contacts, 'array'):
@@ -713,11 +811,9 @@ class BasePeople(sc.prettyobj):
         # Ensure the columns are right and add values if supplied
         for lkey, new_layer in new_contacts.items():
             n = len(new_layer['p1'])
-            if 'layer' not in new_layer:
-                new_layer['layer'] = np.array([lkey]*n)
             if 'beta' not in new_layer or len(new_layer['beta']) != n:
                 if beta is None:
-                    beta = self.pars['beta_layer'][lkey]
+                    beta = 1.0
                 beta = cvd.default_float(beta)
                 new_layer['beta'] = np.ones(n, dtype=cvd.default_float)*beta
 
@@ -751,7 +847,7 @@ class BasePeople(sc.prettyobj):
         except KeyError:
             lkeystr = ', '.join(lkeys)
             errormsg = f'Layer "{lkey}" could not be loaded since it was not among parameter keys "{lkeystr}". Please update manually or via sim.reset_layer_pars().'
-            raise cvm.KeyNotFoundError(errormsg)
+            raise sc.KeyNotFoundError(errormsg)
 
         # Turn into a dataframe
         for lkey in lkeys:
@@ -765,7 +861,7 @@ class BasePeople(sc.prettyobj):
 
     @staticmethod
     def remove_duplicates(df):
-        ''' Sort the dataframe and remove duplicates '''
+        ''' Sort the dataframe and remove duplicates -- note, not extensively tested '''
         p1 = df[['p1', 'p2']].values.min(1) # Reassign p1 to be the lower-valued of the two contacts
         p2 = df[['p1', 'p2']].values.max(1) # Reassign p2 to be the higher-valued of the two contacts
         df['p1'] = p1
@@ -807,7 +903,7 @@ class FlexDict(dict):
                 dictkey = self.keys()[key]
                 return self[dictkey]
             except:
-                raise KE # This is the original errors
+                raise sc.KeyNotFoundError(KE) # Raise the original error
 
     def keys(self):
         return list(super().keys())
@@ -906,8 +1002,8 @@ class Layer(FlexDict):
     def from_df(self, df):
         ''' Convert from dataframe '''
         for key in self.meta.keys():
-            self[key] = df[key]
-        return
+            self[key] = df[key].to_numpy()
+        return self
 
 
 
@@ -922,10 +1018,12 @@ class TransTree(sc.prettyobj):
         pop_size (int): the number of people in the population
     '''
 
-    def __init__(self, pop_size):
+    def __init__(self, pop_size, n_days):
         self.linelist = [None]*pop_size
         self.targets  = [[] for p in range(len(self))] # Make a list of empty lists
         self.detailed = None
+        self.pop_size = pop_size
+        self.n_days   = n_days
         return
 
 
@@ -968,26 +1066,61 @@ class TransTree(sc.prettyobj):
                 if transdict is not None:
 
                     # Pull out key quantities
-                    ddict  = sc.dcp(transdict) # For "detailed dictionary"
-                    source = ddict['source']
-                    target = ddict['target']
-                    date   = ddict['date']
+                    ddict  = sc.objdict(sc.dcp(transdict)) # For "detailed dictionary"
+                    source = ddict.source
+                    target = ddict.target
+                    ddict.s = sc.objdict() # Source
+                    ddict.t = sc.objdict() # Target
 
-                    # Only need to check against the date, since will return False if condition is false (NaN)
-                    if source is not None: # This information is only available for people infected by other people, not e.g. importations
-                        ddict['s_symp']    = people.date_symptomatic[source] <= date
-                        ddict['s_diag']    = people.date_diagnosed[source]   <= date
-                        ddict['s_quar']    = people.date_quarantined[source] <= date
-                        ddict['s_sev']     = people.date_severe[source]      <= date
-                        ddict['s_crit']    = people.date_critical[source]    <= date
-                        ddict['t_quar']    = people.date_quarantined[target] <= date
-                        ddict['s_asymp']   = np.isnan(people.date_symptomatic[source])
-                        ddict['s_presymp'] = ~ddict['s_asymp'] and ~ddict['s_symp'] # Not asymptomatic and not currently symptomatic
+                    # If the source is available (e.g. not a seed infection), loop over both it and the target
+                    if source is not None:
+                        stdict = {'s':source, 't':target}
+                    else:
+                        stdict = {'t':target}
+
+                    # Pull out each of the attributes relevant to transmission
+                    attrs = ['age', 'date_symptomatic', 'date_tested', 'date_diagnosed', 'date_quarantined', 'date_severe', 'date_critical', 'date_known_contact']
+                    for st,stind in stdict.items():
+                        for attr in attrs:
+                            ddict[st][attr] = people[attr][stind]
+                    if source is not None:
+                        for attr in attrs:
+                            if attr.startswith('date_'):
+                                is_attr = attr.replace('date_', 'is_') # Convert date to a boolean, e.g. date_diagnosed -> is_diagnosed
+                                ddict.s[is_attr] = ddict.s[attr] <= ddict['date'] # These don't make sense for people just infected (targets), only sources
+
+                        ddict.s.is_asymp   = np.isnan(people.date_symptomatic[source])
+                        ddict.s.is_presymp = ~ddict.s.is_asymp and ~ddict.s.is_symptomatic # Not asymptomatic and not currently symptomatic
+                    ddict.t['is_quarantined'] = ddict.t['date_quarantined'] <= ddict['date'] # This is the only target date that it makes sense to define since it can happen before infection
 
                     self.detailed[target] = ddict
 
         return
 
 
-    def plot(self):
-        raise NotImplementedError('Transmission tree plotting is not yet available')
+    def plot(self, *args, **kwargs):
+        ''' Plot the transmission tree '''
+        return cvplt.plot_transtree(self, *args, **kwargs)
+
+
+    def animate(self, *args, **kwargs):
+        '''
+        Animate the transmission tree.
+
+        Args:
+            animate    (bool):  whether to animate the plot (otherwise, show when finished)
+            verbose    (bool):  print out progress of each frame
+            markersize (int):   size of the markers
+            sus_color  (list):  color for susceptibles
+            fig_args   (dict):  arguments passed to pl.figure()
+            axis_args  (dict):  arguments passed to pl.subplots_adjust()
+            plot_args  (dict):  arguments passed to pl.plot()
+            delay      (float): delay between frames in seconds
+            font_size  (int):   size of the font
+            colors     (list):  color of each person
+            cmap       (str):   colormap for each person (if colors is not supplied)
+
+        Returns:
+            fig: the figure object
+        '''
+        return cvplt.animate_transtree(self, *args, **kwargs)

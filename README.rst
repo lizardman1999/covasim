@@ -8,10 +8,18 @@ indicators such as numbers of infections and peak hospital demand. Covasim can
 also be used to explore the potential impact of different interventions, including
 social distancing, school closures, testing, contact tracing, and quarantine.
 
+The scientific paper describing Covasim is available at http://paper.covasim.org.
+The recommended citation is:
+
+    Kerr CC, Stuart RM, Mistry D, Abeysuriya RG, Hart G, Rosenfeld R, Selvaraj P, Núñez RC, Hagedorn B, George L, Izzo A, Palmer A, Delport D, Bennette C, Wagner B, Chang S, Cohen JA, Panovska-Griffiths J, Jastrzębski M, Oron AP, Wenger E, Famulare M, Klein DJ (2020). *Covasim: an agent-based model of COVID-19 dynamics and interventions*. Institute for Disease Modeling. Available at http://paper.covasim.org.
+
+The Covasim webapp is available at http://app.covasim.org.
+
 Questions or comments can be directed to covasim@idmod.org, or on this project's
-GitHub_ page.
+GitHub_ page. Full information about Covasim is provided in the documentation_.
 
 .. _GitHub: https://github.com/institutefordiseasemodeling/covasim
+.. _documentation: https://docs.covasim.org
 
 .. contents:: Contents
    :local:
@@ -28,6 +36,7 @@ more information, see documentation for venv_ or Anaconda_.
 
 .. _venv: https://docs.python.org/3/tutorial/venv.html
 .. _Anaconda: https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html
+
 
 Quick start guide
 ==================
@@ -89,46 +98,59 @@ follows:
 Module structure
 ================
 
-All core model code is located in the `covasim` subfolder; standard usage is
-`import covasim as cv`. The other subfolders, `cruise_ship` and `webapp`, are
+All core model code is located in the ``covasim`` subfolder; standard usage is
+``import covasim as cv``. The other subfolders, ``cruise_ship``, ``data``, and ``webapp``, are
 also described below.
 
-The model consists of two core classes: the `Person` class (which contains
-information on health state), and the `Sim` class (which contains methods for
+The model consists of two core classes: the ``Person`` class (which contains
+information on health state), and the ``Sim`` class (which contains methods for
 running, calculating results, plotting, etc.).
 
-The structure of the `covasim` folder is as follows:
+The structure of the ``covasim`` folder is as follows:
 
-* `base.py`: The `ParsObj` class, plus basic methods of the `BaseSim` class, and associated functions.
-* `defaults.py`: The default colors, plots, etc. used by Covasim.
-* `interventions.py`: The `Intervention` class, for adding interventions and dynamically modifying parameters.
-* `parameters.py`: Functions for creating the parameters dictionary and loading the input data.
-* `person.py`: The `Person` class.
-* `population.py`: The `People` class, and functions for creating a population of people.
-* `requirements.py`: A simple module to check that imports succeeded, and turn off features if they didn't.
-* `run.py`: Functions for running simulations (e.g. parallel runs and the `Scenarios` class).
-* `sim.py`: The `Sim` class, which performs most of the heavy lifting: initializing the model, running, and plotting.
-* `utils.py`: Functions for choosing random numbers, many based on Numba, plus other helper functions.
-* `version.py`: Version, date, and license information.
+* ``base.py``: The ``ParsObj`` class, plus basic methods of the ``BaseSim`` class, and associated functions.
+* ``defaults.py``: The default colors, plots, etc. used by Covasim.
+* ``interventions.py``: The ``Intervention`` class, for adding interventions and dynamically modifying parameters.
+* ``misc.py``: Miscellaneous helper functions.
+* ``parameters.py``: Functions for creating the parameters dictionary and loading the input data.
+* ``population.py``: The ``People`` class, for handling updates of state for each person.
+* ``plotting.py``: Plotly graphs to supplement the built-in Matplotlib graphs.
+* ``population.py``: Functions for creating populations of people, including age, contacts, etc.
+* ``requirements.py``: A simple module to check that imports succeeded, and turn off features if they didn't.
+* ``run.py``: Functions for running simulations (e.g. parallel runs and the ``Scenarios`` class).
+* ``sim.py``: The ``Sim`` class, which performs most of the heavy lifting: initializing the model, running, and plotting.
+* ``utils.py``: Functions for choosing random numbers, many based on Numba, plus other helper functions.
+* ``version.py``: Version, date, and license information.
 
-cruise_ship
+
+Cruise ship
 -----------
 
 A version of the Covasim model specifically adapted for modeling the Diamond
-Princess cruise ship. It uses its own parameters file (`parameters.py`) and has
-slight variations to the model (`model.py`).
+Princess cruise ship. It uses its own parameters file (``parameters.py``) and has
+slight variations to the model (``model.py``).
 
-webapp
+
+Data
+----
+
+This folder contains loading scripts for the epidemiological data in the root ``data`` folder, as well as data on age distributions for different countries and household sizes.
+
+
+
+Webapp
 ------
 
 For running the interactive web application. See the `webapp README`_ for more information.
 
-.. _webapp README: ./covasim/webapp
+.. _webapp README: https://github.com/InstituteforDiseaseModeling/covasim/tree/master/covasim/webapp
+
 
 Other folders
 =============
 
 Please see the readme in each subfolder for more information.
+
 
 bin
 ---
@@ -140,32 +162,38 @@ This folder contains a command-line interface (CLI) version of Covasim; example 
 Note: the CLI is currently not compatible with Windows. You will need to add
 this folder to your path to run from other folders.
 
+
 data
 ----
 
 Scripts to automatically scrape data (including demographics and COVID epidemiology data),
 and the data files themselves (which are not part of the repository).
 
+
 docker
 ------
 
-This folder contains the `Dockerfile` and other files that allow Covasim to be
+This folder contains the ``Dockerfile`` and other files that allow Covasim to be
 run as a webapp via Docker.
+
 
 examples
 --------
 
 This folder contains demonstrations of simple Covasim usage.
 
+
 licenses
 --------
 
 Licensing information and legal notices.
 
+
 tests
 -----
 
 Integration, development, and unit tests.
+
 
 sweep
 -----

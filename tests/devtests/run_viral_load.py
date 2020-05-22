@@ -5,7 +5,7 @@ import covasim as cv
 import numpy as np
 from scipy.special import kl_div
 
-runs = 50
+runs = 100
 r0_const = np.zeros(runs)
 r0_twolevel = np.zeros(runs)
 r0_twolevel2 = np.zeros(runs)
@@ -15,7 +15,7 @@ base_pars = sc.objdict(
         diag_factor  = 1, # Multiply beta by this factor for diganosed cases -- baseline assumes complete isolation
         verbose = 0,
         pop_size = 1000,
-        pop_infected = 10
+        pop_infected = 1
 )
 base_pars['dur'] = {}
 base_pars['dur']['exp2inf']  = {'dist':'normal_int', 'par1':4, 'par2':0} # Duration from exposed to infectious
@@ -36,23 +36,24 @@ base_pars['rel_severe_prob'] = 0  # Scale factor for proportion of symptomatic c
 base_pars['rel_crit_prob']   = 0  # Scale factor for proportion of severe cases that become critical
 base_pars['rel_death_prob']  = 0  # Scale factor for proportion of critical cases that result in death
 base_pars['prog_by_age']     = False
+base_pars['beta_dist']   = {'dist':'lognormal','par1':1, 'par2':0}
 
 for i in range(runs):
     # Configure the sim -- can also just use a normal dictionary
     pars = base_pars
     pars['rand_seed'] = i*np.random.rand()
-    pars['viral_dist'] = {'frac_time':1, 'load_ratio':1}
+    pars['viral_dist'] = {'frac_time':1, 'load_ratio':1, 'high_cap':100}
     print('Making sim ', i, '...')
     sim1 = cv.Sim(pars=pars)
     sim1.run()
     r0_const[i] = len(sim1.people.transtree.targets[0])
     pars['rand_seed'] = i*np.random.rand()
-    pars['viral_dist'] = {'frac_time':.5, 'load_ratio':2}
+    pars['viral_dist'] = {'frac_time':.5, 'load_ratio':2, 'high_cap':4}
     sim2 = cv.Sim(pars=pars)
     sim2.run()
     r0_twolevel[i] = len(sim2.people.transtree.targets[0])
     pars['rand_seed'] = i*np.random.rand()
-    pars['viral_dist'] = {'frac_time':.3, 'load_ratio':3}
+    pars['viral_dist'] = {'frac_time':.3, 'load_ratio':3, 'high_cap':1}
     sim3 = cv.Sim(pars=pars)
     sim3.run()
     r0_twolevel2[i] = len(sim3.people.transtree.targets[0])

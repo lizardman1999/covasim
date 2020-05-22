@@ -14,9 +14,9 @@ const PlotlyChart = {
                 let x = JSON.parse(this.graph.json);
                 x.responsive = true;
                 Plotly.react(this.graph.id, x);
+                window.dispatchEvent(new Event('resize'))
             }
-        }
-        );
+        });
     },
     updated() {
         this.$nextTick(function () {
@@ -33,45 +33,65 @@ const PlotlyChart = {
 
 const interventionTableConfig = {
     social_distance: {
-        formTitle: "Social distancing",
-        fields: [{key: 'start', type: 'number', label: 'Start day'},
-            {key: 'end', type: 'number', label: 'End day'},
-            {label: 'Effectiveness', key: 'level', type: 'select', options: [{label: 'Aggressive effectiveness', value: 'aggressive'}, {label: 'Moderate effectiveness', value: 'moderate'}, {label: 'Mild effectiveness', value: 'mild'}]}],
+        formTitle: "Distancing",
+        toolTip: "Physical distancing and social distancing interventions",
+        fields: [
+            {key: 'start', type: 'number', label: 'Start day', tooltip: 'Start day of intervention', value: 0},
+            {key: 'end', type: 'number', label: 'End day', tooltip: 'End day of intervention (leave blank for no end)', value: null},
+            {key: 'level', type: 'number', label: 'Effectiveness', tooltip: 'Impact of social distancing (examples: 20 = mild, 50 = moderate, 80 = aggressive)', min: 0, max: 100, value: 50}
+        ],
         handleSubmit: function(event) {
-            const start = parseInt(event.target.elements.start.value);
-            const end = parseInt(event.target.elements.end.value);
+            const start = vm.parse_day(event.target.elements.start.value);
+            const end = vm.parse_day(event.target.elements.end.value);
             const level = event.target.elements.level.value;
             return {start, end, level};
         }
     },
     school_closures: {
-        formTitle: "School closures",
-        fields: [{key: 'start', type: 'number', label: 'Start day'}, {key: 'end', type: 'number', label: 'End day'}],
+        formTitle: "Schools",
+        toolTip: "School and university closures",
+        fields: [
+            {key: 'start', type: 'number', label: 'Start day', tooltip: 'Start day of intervention', value: 0},
+            {key: 'end', type: 'number', label: 'End day', tooltip: 'End day of intervention (leave blank for no end)', value: null},
+            {key: 'level', type: 'number', label: 'Effectiveness', tooltip: 'Impact of school closures (0 = no schools closed, 100 = all schools closed)', min: 0, max: 100, value: 90}
+        ],
         handleSubmit: function(event) {
-            const start = parseInt(event.target.elements.start.value);
-            const end = parseInt(event.target.elements.end.value);
-            return {start, end};
+            const start = vm.parse_day(event.target.elements.start.value);
+            const end = vm.parse_day(event.target.elements.end.value);
+            const level = event.target.elements.level.value;
+            return {start, end, level};
         }
     },
     symptomatic_testing: {
-        formTitle: "Symptomatic testing",
-        fields: [{key: 'start', type: 'number', label: 'Start day'}, {key: 'end', type: 'number', label: 'End day'}, {label: 'Coverage', key: 'level', type: 'select', options: [{label: '10% per day', value: '10'}, {label: '30% per day', value: '30'},]}],
+        formTitle: "Testing",
+        toolTip: "Testing rates for people with symptoms",
+        fields: [
+            {key: 'start', type: 'number', label: 'Start day', tooltip: 'Start day of intervention', value: 0},
+            {key: 'end', type: 'number', label: 'End day', tooltip: 'End day of intervention (leave blank for no end)', value: null},
+            {key: 'level', type: 'number', label: 'Effectiveness', tooltip: 'Proportion of people tested per day (0 = no testing, 10 = 10% of people tested per day, 100 = everyone tested every day); assumes 1 day test delay', min: 0, max: 100, value: 10}
+        ],
         handleSubmit: function(event) {
-            const start = parseInt(event.target.elements.start.value);
-            const end = parseInt(event.target.elements.end.value);
-            const level = parseInt(event.target.elements.level.value);
+            const start = vm.parse_day(event.target.elements.start.value);
+            const end = vm.parse_day(event.target.elements.end.value);
+            const level = event.target.elements.level.value;
             return {start, end, level};
         }
     },
     contact_tracing: {
-        formTitle: "Contact tracing",
-        fields: [{key: 'start', type: 'number', label: 'Start Day'}, {key: 'end', type: 'number', label: 'End day'}],
+        formTitle: "Tracing",
+        toolTip: "Contact tracing of diagnosed cases (requires testing intervention)",
+        fields: [
+            {key: 'start', type: 'number', label: 'Start day', tooltip: 'Start day of intervention', value: 0},
+            {key: 'end', type: 'number', label: 'End day', tooltip: 'End day of intervention (leave blank for no end)', value: null},
+            {key: 'level', type: 'number', label: 'Effectiveness', tooltip: 'Effectiveness of contact tracing (0 = no tracing, 100 = all contacts traced); assumes 1 day tracing delay. Please note: you must implement a testing intervention as well for tracing to have any effect.', min: 0, max: 100, value: 80}
+        ],
         handleSubmit: function(event) {
-            const start = parseInt(event.target.elements.start.value);
-            const end = parseInt(event.target.elements.end.value);
-            return {start, end};
+            const start = vm.parse_day(event.target.elements.start.value);
+            const end = vm.parse_day(event.target.elements.end.value);
+            const level = event.target.elements.level.value;
+            return {start, end, level};
         }
-  }
+    }
 
 };
 
@@ -140,7 +160,8 @@ var vm = new Vue({
                 copyright_year: copyright_year(),
                 github_url: "https://github.com/institutefordiseasemodeling/covasim",
                 org_url: "https://idmod.org",
-                docs_url: "https://institutefordiseasemodeling.github.io/covasim-docs",
+                docs_url: "http://docs.covasim.org",
+                paper_url: "http://paper.covasim.org",
                 license: 'Loading...',
                 notice: 'Loading...'
             },
@@ -169,13 +190,14 @@ var vm = new Vue({
             interventionTableConfig,
             running: false,
             errs: [],
-            reset_options: ['Example'],//, 'Seattle', 'Wuhan', 'Global'],
-            reset_choice: 'Example'
+            reset_options: ['Default', 'Optimistic', 'Pessimistic'],
+            reset_choice: 'Default'
         };
     },
 
-    async created() {
+    created() {
         this.get_version();
+        this.get_location_options();
         this.resetPars();
         this.watchSimLengthParam();
         this.get_licenses();
@@ -206,7 +228,7 @@ var vm = new Vue({
                 this.$set(this.int_pars, key, []);
             }
             // validate intervention
-            const notValid = !intervention.end || !intervention.start || intervention.end <= intervention.start
+            const notValid = !intervention.end || intervention.start < 0 || intervention.end <= intervention.start
             if (notValid) {
                 this.$set(this.scenarioError, scenarioKey, `Please enter a valid day range`);
                 return;
@@ -234,7 +256,7 @@ var vm = new Vue({
             this.int_pars[key].push(intervention);
             const result = this.int_pars[key].sort((a, b) => a.start - b.start);
             this.$set(this.int_pars, key, result);
-            const response = await sciris.rpc('get_gantt', undefined, {int_pars: this.int_pars, intervention_config: this.interventionTableConfig});
+            const response = await sciris.rpc('get_gantt', undefined, {int_pars: this.int_pars, intervention_config: this.interventionTableConfig, n_days: this.sim_length.best});
             this.intervention_figs = response.data;
         },
         async deleteIntervention(scenarioKey, index) {
@@ -242,12 +264,17 @@ var vm = new Vue({
             const response = await sciris.rpc('get_gantt', undefined, {int_pars: this.int_pars, intervention_config: this.interventionTableConfig});
             this.intervention_figs = response.data;
         },
-        open_panel() {
-            this.panel_open = true;
+
+        parse_day(day) {
+            if (day == null || day == '') {
+                const output = this.sim_length.best
+                return output
+            } else {
+                const output = parseInt(day)
+                return output
+            }
         },
-        close_panel() {
-            this.panel_open = false;
-        },
+
         resize_start() {
             this.resizing = true;
         },
@@ -263,15 +290,27 @@ var vm = new Vue({
             }
         },
 
+        dispatch_resize(){
+            window.dispatchEvent(new Event('resize'))
+        },
         async get_version() {
             const response = await sciris.rpc('get_version');
             this.app.version = response.data;
         },
-        async get_licenses(){
+
+        async get_location_options() {
+            let response = await sciris.rpc('get_location_options');
+            for (let country of response.data) {
+                this.reset_options.push(country);
+            }
+        },
+
+        async get_licenses() {
             const response = await sciris.rpc('get_licenses');
             this.app.license = response.data.license;
             this.app.notice = response.data.notice;
         },
+
         async runSim() {
             this.running = true;
             // this.graphs = this.$options.data().graphs; // Uncomment this to clear the graphs on each run
@@ -290,7 +329,8 @@ var vm = new Vue({
                     int_pars: this.int_pars,
                     datafile: this.datafile.server_path,
                     show_animation: this.show_animation,
-                    n_days: this.sim_length.best
+                    n_days: this.sim_length.best,
+                    location: this.reset_choice
                 }
                 console.log('run_sim: ', kwargs);
                 const response = await sciris.rpc('run_sim', undefined, kwargs);
@@ -298,11 +338,11 @@ var vm = new Vue({
                 this.result.files = response.data.files;
                 this.result.summary = response.data.summary;
                 this.errs = response.data.errs;
-                this.panel_open = this.errs.length > 0;
+                // this.panel_open = this.errs.length > 0; // Better solution would be to have a pin button
                 this.sim_pars = response.data.sim_pars;
                 this.epi_pars = response.data.epi_pars;
                 this.int_pars = response.data.int_pars;
-                this.history.push(JSON.parse(JSON.stringify({ sim_pars: this.sim_pars, epi_pars: this.epi_pars, int_pars: this.int_pars, result: this.result })));
+                this.history.push(JSON.parse(JSON.stringify({ sim_pars: this.sim_pars, epi_pars: this.epi_pars, reset_choice: this.reset_choice, int_pars: this.int_pars, result: this.result })));
                 this.historyIdx = this.history.length - 1;
 
             } catch (e) {
@@ -310,6 +350,7 @@ var vm = new Vue({
                     message: 'Unable to submit model.',
                     exception: `${e.constructor.name}: ${e.message}`
                 })
+                this.panel_open = true
             }
             this.running = false;
 
@@ -319,14 +360,15 @@ var vm = new Vue({
             const response = await sciris.rpc('get_defaults', [this.reset_choice]);
             this.sim_pars = response.data.sim_pars;
             this.epi_pars = response.data.epi_pars;
-            this.sim_length = {...this.sim_pars['n_days']}
+            this.sim_length = this.sim_pars['n_days'];
             this.int_pars = {};
             this.intervention_figs = {};
             this.setupFormWatcher('sim_pars');
             this.setupFormWatcher('epi_pars');
-            this.graphs = [];
+            // this.result.graphs = [];
             this.reset_datafile()
         },
+
         setupFormWatcher(paramKey) {
             const params = this[paramKey];
             if (!params) {
@@ -336,9 +378,11 @@ var vm = new Vue({
                 this.$watch(`${paramKey}.${key}`, this.validateParam(key), { deep: true });
             });
         },
+
         watchSimLengthParam() {
             this.$watch('sim_length', this.validateParam('sim_length'), { deep: true });
         },
+
         validateParam(key) {
             return (param) => {
                 if (param.best <= param.max && param.best >= param.min) {
@@ -373,7 +417,7 @@ var vm = new Vue({
                 this.sim_pars = response.data.sim_pars;
                 this.epi_pars = response.data.epi_pars;
                 this.int_pars = response.data.int_pars;
-                this.graphs = [];
+                this.result.graphs = [];
                 this.intervention_figs = {}
 
                 if (this.int_pars){
@@ -388,15 +432,18 @@ var vm = new Vue({
         upload_datafile: generate_upload_file_handler(function(filepath){
             vm.datafile.server_path = filepath
         }),
+
         reset_datafile() {
             this.datafile = {
                 local_path: null,
                 server_path: null
             }
         },
+
         loadPars() {
             this.sim_pars = this.history[this.historyIdx].sim_pars;
             this.epi_pars = this.history[this.historyIdx].epi_pars;
+            this.reset_choice = this.history[this.historyIdx].reset_choice;
             this.int_pars = this.history[this.historyIdx].int_pars;
             this.result = this.history[this.historyIdx].result;
         },
